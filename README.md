@@ -64,7 +64,7 @@ def execute(cmd, verbose=False, timeout=None)
 ```
 ### Demo
 
-![Demo](https://s2.gifyu.com/images/demo.gif)
+![FShell Demo](https://github.com/Hypnoze57/FShell/blob/master/demo.gif)
 
 
 # Thanks
