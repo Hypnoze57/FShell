@@ -18,9 +18,9 @@ Then, create a bash loop that read named pipe content, send it to bash and send 
 
 Next part is to start a python thread that performing ```cat /tmp/output``` regularly in order to get output of commands. <br/>
 If the thread find output, it will clear file content using ```echo '' > /tmp/output```<br/>
-*Tips: In order to avoid error logging of an non-existing file, we execute 'id' command before starting the 'GetOutput' thread to create the output file before reading it.*
+<br>*Tips: In order to avoid error logging of an non-existing file, we execute 'id' command before starting the 'GetOutput' thread to create the output file before reading it.*
 
-The final step is to get user input from our python script and sent it in the named pipe using that kind of command: <br>```echo USERCMD > /tmp/input```
+One of the last step is to get user input from our python script and sent it in the named pipe using that kind of command: <br>```echo USERCMD > /tmp/input```
 
 **Final trick**
 So, using this we get back a remote interactive shell but some command should not work because we have not a 'tty'.
