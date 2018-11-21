@@ -4,8 +4,8 @@
 FShell is my implementation of a Forward Shell. It's designed to get an interactive tty using remote code execution through a stageless protocol (eg HTTP).
 
 ## Why I should use a forward shell ?
-- The remote server is not able to reach internet (no reverse shell possibility)
-- The remote server is not initiating any new outgoing connection, only response to 'standard' request
+- The remote server is not able to reach internet, no reverse shell possibility
+- I don't want the server initiate new outgoing connection or expose new service (only use vulnerable exposed service)
 
 However, it also have disadvantage
 - Many requests per second (in case of a web server, it will generate many access log)
